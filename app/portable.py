@@ -86,6 +86,10 @@ googlebot_headers = {
 jobs = {}
 jobs_lock = threading.Lock()
 
+page_cache = {}
+page_cache_lock = threading.Lock()
+PAGE_CACHE_TTL = 300
+
 
 class UserFacingError(Exception):
     def __init__(self, user_message):
@@ -101,6 +105,7 @@ html = """
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <title>13ft Ladder</title>
+    <link rel="icon" href="/favicon.ico" type="image/png">
     <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600&display=swap" rel="stylesheet" async>
     <style>
         * { box-sizing: border-box; }
@@ -162,35 +167,103 @@ html = """
             right: 10px;
         }
 
-        .dark-mode-toggle input { display: none; }
+        .dark-mode-toggle input {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border: 0;
+        }
 
         .dark-mode-toggle label {
             cursor: pointer;
-            text-indent: -9999px;
-            width: 52px;
-            height: 27px;
-            background: grey;
+            width: 54px;
+            height: 28px;
+            background: #cbd5e1;
             display: block;
             border-radius: 100px;
             position: relative;
+            transition: background-color 0.3s, border-color 0.3s;
+            border: 1px solid #b8c2cc;
         }
 
-        .dark-mode-toggle label:after {
-            content: '';
+        .dark-mode-toggle label:hover {
+            background: #b8c2cc;
+            border-color: #a1b0be;
+        }
+
+        .dark-mode-toggle input:focus-visible + label {
+            outline: 2px solid #a327f0;
+            outline-offset: 3px;
+        }
+
+        body.dark-mode .dark-mode-toggle input:focus-visible + label {
+            outline-color: #7359f8;
+        }
+
+        .dark-mode-toggle .thumb {
             position: absolute;
             top: 2px;
             left: 2px;
-            width: 23px;
-            height: 23px;
+            width: 22px;
+            height: 22px;
             background: #fff;
-            border-radius: 90px;
-            transition: 0.3s;
+            border-radius: 50%;
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.3s, box-shadow 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
         }
 
-        .dark-mode-toggle input:checked+label { background: #7359f8; }
-        .dark-mode-toggle input:checked+label:after {
-            left: calc(100% - 2px);
-            transform: translateX(-100%);
+        .dark-mode-toggle input:checked+label {
+            background: #312e81;
+            border-color: #4338ca;
+        }
+
+        .dark-mode-toggle input:checked+label:hover {
+            background: #2e2a78;
+            border-color: #3b379d;
+        }
+
+        .dark-mode-toggle input:checked+label .thumb {
+            transform: translateX(26px);
+            background: #1e1b4b;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4), 0 0 8px rgba(99, 102, 241, 0.4);
+        }
+
+        .dark-mode-toggle .icon {
+            position: absolute;
+            width: 14px;
+            height: 14px;
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease;
+        }
+
+        .dark-mode-toggle .icon.sun {
+            color: #ea580c;
+            opacity: 1;
+            transform: scale(1) rotate(0deg);
+        }
+
+        .dark-mode-toggle .icon.moon {
+            color: #4f46e5;
+            opacity: 0;
+            transform: scale(0) rotate(-90deg);
+        }
+
+        .dark-mode-toggle input:checked+label .icon.sun {
+            opacity: 0;
+            transform: scale(0) rotate(90deg);
+        }
+
+        .dark-mode-toggle input:checked+label .icon.moon {
+            color: #c7d2fe;
+            opacity: 1;
+            transform: scale(1) rotate(0deg);
         }
 
         @media only screen and (max-width: 600px) {
@@ -324,7 +397,24 @@ html = """
 <body>
     <div class="dark-mode-toggle">
         <input type="checkbox" id="dark-mode-toggle">
-        <label for="dark-mode-toggle" title="{{ toggle_dark_mode }}"></label>
+        <label for="dark-mode-toggle" title="{{ toggle_dark_mode }}">
+            <span class="thumb">
+                <svg class="icon sun" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="5"></circle>
+                    <line x1="12" y1="1" x2="12" y2="3"></line>
+                    <line x1="12" y1="21" x2="12" y2="23"></line>
+                    <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                    <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                    <line x1="1" y1="12" x2="3" y2="12"></line>
+                    <line x1="21" y1="12" x2="23" y2="12"></line>
+                    <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                    <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+                </svg>
+                <svg class="icon moon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                </svg>
+            </span>
+        </label>
     </div>
 
     <div id="form-view">
@@ -445,19 +535,15 @@ html = """
                     const pct = Math.min(((idx + 1) / STEPS.length) * 100, 95);
                     progressEl.style.width = pct + '%';
                 }
-            });
-
-            evtSource.addEventListener('done', function(e) {
-                evtSource.close();
-                clearInterval(timer);
-                renderSteps(STEPS.length);
-                progressEl.style.width = '100%';
-                const data = JSON.parse(e.data);
-                setTimeout(() => {
-                    document.open();
-                    document.write(data.html);
-                    document.close();
-                }, 400);
+                if (data.redirect) {
+                    evtSource.close();
+                    clearInterval(timer);
+                    renderSteps(STEPS.length);
+                    progressEl.style.width = '100%';
+                    setTimeout(() => {
+                        window.location.href = data.redirect;
+                    }, 400);
+                }
             });
 
             evtSource.addEventListener('error_msg', function(e) {
@@ -472,6 +558,14 @@ html = """
                 clearInterval(timer);
                 showError(UI_STRINGS.connection_lost_error);
             };
+        });
+
+        window.addEventListener('pageshow', function(event) {
+            if (event.persisted) {
+                document.getElementById('form-view').style.display = '';
+                document.getElementById('status-view').style.display = 'none';
+                document.getElementById('link').value = '';
+            }
         });
     </script>
 </body>
@@ -524,7 +618,11 @@ def process_html_document(html_content, original_url):
         base_url = urljoin(base_url, parsed_url.path.rsplit("/", 1)[0] + "/")
 
     base_tag = soup.find("base")
-    if not base_tag:
+    if base_tag:
+        # Always overwrite — sites may have <base href="/"> which would resolve
+        # root-relative asset paths to the 13ft server instead of the original domain.
+        base_tag["href"] = base_url
+    else:
         new_base_tag = soup.new_tag("base", href=base_url)
         if soup.head:
             soup.head.insert(0, new_base_tag)
@@ -534,6 +632,20 @@ def process_html_document(html_content, original_url):
             soup.insert(0, head_tag)
 
     domain = parsed_url.netloc.lower()
+
+    # --- GENERAL FIXES ---
+
+    # Strip anti-hotlinking, anti-embedding, and frame-busting scripts.
+    for script in soup.find_all("script", src=False):
+        content = script.get_text(default="")
+        
+        # Target the specific hostname check
+        if "location.hostname" in content and ("location.href" in content or "location.replace" in content):
+            script.decompose()
+            
+        # Optional: Catch common frame-busting scripts if you are viewing this via an iframe
+        elif "top.location" in content or "window.top" in content:
+            script.decompose()
 
     # --- SITE SPECIFIC FIXES ---
 
@@ -550,7 +662,22 @@ def process_html_document(html_content, original_url):
             current_style = soup.body.get("style", "")
             soup.body["style"] = f"{current_style}; overflow: auto !important; position: static !important;"
 
+    # --- FAVICON OVERRIDE ---
+    # Remove any existing favicon links from the source page and inject the
+    # 13ft favicon so the browser tab always shows the 13ft logo.
+    for link_tag in soup.find_all("link", rel=lambda r: r and any(
+            v.lower() in ("icon", "shortcut icon", "apple-touch-icon",
+                          "apple-touch-icon-precomposed", "mask-icon")
+            for v in (r if isinstance(r, list) else [r])
+    )):
+        link_tag.decompose()
+
+    favicon_tag = soup.new_tag("link", rel="icon", href="/favicon.ico", type="image/png")
+    if soup.head:
+        soup.head.append(favicon_tag)
+
     return str(soup)
+
 
 
 CHALLENGE_SIGNATURES = [
@@ -709,6 +836,12 @@ def bypass_paywall(url, strings, job_id=None):
         html_text = response.text
         final_url = response.url
 
+        # Treat error status codes as a challenge so the archive fallbacks trigger.
+        # Sites like News24 return 403 with their homepage HTML (which contains a
+        # JS redirect back to the homepage), causing the browser to redirect away.
+        if response.status_code in (401, 403, 407, 429) or response.status_code >= 500:
+            html_text = ""
+
     set_step(job_id, 'detect')
     if not html_text or is_challenge_page(html_text):
         recovered = False
@@ -740,11 +873,32 @@ def bypass_paywall(url, strings, job_id=None):
     return result
 
 
+def normalize_cache_url(url):
+    if "://" in url:
+        return "https://" + url.split("://", 1)[1]
+    return "https://" + url
+
+
+def clean_page_cache():
+    now = time.time()
+    expired = [k for k, v in page_cache.items() if now - v['timestamp'] > PAGE_CACHE_TTL]
+    for k in expired:
+        del page_cache[k]
+
+
 def fetch_worker(job_id, url, strings):
     try:
         result = bypass_paywall(url, strings, job_id)
+        # Never cache challenge/error pages — only store clean article HTML.
+        if not is_challenge_page(result):
+            cache_key = normalize_cache_url(url)
+            with page_cache_lock:
+                clean_page_cache()
+                page_cache[cache_key] = {'html': result, 'timestamp': time.time()}
+        else:
+            cache_key = normalize_cache_url(url)
         with jobs_lock:
-            jobs[job_id]['result'] = result
+            jobs[job_id]['result'] = cache_key
             jobs[job_id]['step'] = 'done'
     except requests.exceptions.Timeout:
         with jobs_lock:
@@ -766,6 +920,17 @@ def fetch_worker(job_id, url, strings):
         with jobs_lock:
             jobs[job_id]['error'] = strings["unexpected_error"]
             jobs[job_id]['step'] = 'error'
+
+
+@app.route("/favicon.ico")
+def favicon():
+    logo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "logo.png")
+    if os.path.exists(logo_path):
+        with open(logo_path, "rb") as f:
+            data = f.read()
+        return Response(data, mimetype="image/png",
+                        headers={"Cache-Control": "public, max-age=86400"})
+    return "", 404
 
 
 @app.route("/")
@@ -803,8 +968,7 @@ def status_stream():
                 if current != last_step:
                     last_step = current
                     if current == 'done':
-                        yield f"event: step\ndata: {json.dumps({'step': 'done'})}\n\n"
-                        yield f"event: done\ndata: {json.dumps({'html': job['result']})}\n\n"
+                        yield f"event: step\ndata: {json.dumps({'step': 'done', 'redirect': '/' + job['result']})}\n\n"
                         break
                     elif current == 'error':
                         yield f"event: error_msg\ndata: {json.dumps({'message': job['error']})}\n\n"
@@ -847,6 +1011,12 @@ def get_article(path):
     parts = full_url.split("/", 4)
     if len(parts) >= 5:
         actual_url = "https://" + parts[4].lstrip("/")
+
+        with page_cache_lock:
+            cached = page_cache.get(actual_url)
+        if cached:
+            return cached['html']
+
         try:
             return bypass_paywall(actual_url, strings)
         except requests.exceptions.Timeout:
