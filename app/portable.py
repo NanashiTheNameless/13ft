@@ -689,6 +689,15 @@ CHALLENGE_SIGNATURES = [
     "attention required",
     "enable javascript and cookies to continue",
     "please verify you are a human",
+    # Imperva / Incapsula block pages (e.g. bizjournals.com). These are also
+    # captured by archive.org, so an archived snapshot can silently be a block
+    # page rather than the article — detect it and fall through to an error.
+    "_incapsula_resource",
+    "incapsula incident",
+    "request unsuccessful",
+    # DataDome block pages (e.g. nytimes.com, ft.com, wsj.com).
+    "datadome",
+    "enable js and disable any ad blocker",
 ]
 
 
