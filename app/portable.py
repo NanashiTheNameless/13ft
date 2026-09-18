@@ -637,7 +637,7 @@ def process_html_document(html_content, original_url):
 
     # Strip anti-hotlinking, anti-embedding, and frame-busting scripts.
     for script in soup.find_all("script", src=False):
-        content = script.get_text(default="")
+        content = script.get_text()
         
         # Target the specific hostname check
         if "location.hostname" in content and ("location.href" in content or "location.replace" in content):
@@ -726,6 +726,25 @@ ARCHIVE_PH_MIRRORS = ["archive.ph", "archive.today", "archive.is", "archive.li"]
 
 FREEDIUM_MIRRORS = ["freedium-mirror.cfd", "freedium.cfd"]
 
+# The original Freedium layout wrapped the post in <div id="main-content">, but
+# the current mirror renders it inside a <main> element instead. Its error pages
+# (e.g. "Article not found") still ship an empty <article> skeleton, so <article>
+# on its own is not proof that the post was rendered.
+FREEDIUM_CONTENT_MARKERS = ("main-content", "<main")
+
+# SvelteKit streams the failure into the page body instead of using a non-200
+# status, so the machine-readable error code is what marks a miss.
+FREEDIUM_ERROR_MARKERS = ("ARTICLE_NOT_FOUND",)
+
+
+def freedium_has_article(html_text):
+    """True when a Freedium response actually contains the rendered post."""
+    if not html_text or len(html_text) < 2000:
+        return False
+    if any(marker in html_text for marker in FREEDIUM_ERROR_MARKERS):
+        return False
+    return any(marker in html_text for marker in FREEDIUM_CONTENT_MARKERS)
+
 
 def is_medium_url(url):
     try:
@@ -754,7 +773,7 @@ def fetch_via_freedium(url, job_id=None):
             text = resp.text
             if is_challenge_page(text):
                 continue
-            if 'main-content' not in text or len(text) < 2000:
+            if not freedium_has_article(text):
                 continue
             return text, resp.url
         except Exception:
